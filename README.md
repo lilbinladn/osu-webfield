@@ -66,9 +66,13 @@ On the first visit the library loads a starter set from the osu! mirror:
 - **Butterfly** — standard, 1.6–3.9★
 - **Ievan Polkka** — standard, 1.6–4.9★
 - **Ievan Polkka** — 4K/7K mania, 2.4–2.5★
+- **Yomi yori Kikoyu…** — 4K mania, 4.99★
+- **Blue Zenith / FREEDOM DiVE** — ranked 4K mania sets, 3.7–6.3★
 - **The Big Black** — standard, 9 difficulties
 - **Blue Zenith** — standard
 - **FREEDOM DiVE** — 6K mania
+
+Use the **All / osu!std / osu!mania** buttons above the library to filter charts.
 
 Each `.osz` is downloaded once and stored in the browser's Cache Storage; later page
 loads read them from that cache, so only the first visit needs the downloads. As with

@@ -29,12 +29,13 @@ export function emptyImages() {
 }
 
 export class ManiaSkin {
-    constructor({ id, name, author = '', configs = new Map(), images = emptyImages(), isDefault = false, source = '' }) {
+    constructor({ id, name, author = '', configs = new Map(), images = emptyImages(), imagesByKeyCount = new Map(), isDefault = false, source = '' }) {
         this.id = id;
         this.name = name;
         this.author = author;
         this.configs = configs;
         this.images = images;
+        this.imagesByKeyCount = imagesByKeyCount;
         this.isDefault = isDefault;
         this.source = source;
     }
@@ -43,9 +44,16 @@ export class ManiaSkin {
         return this.configs.get(keyCount) ?? null;
     }
 
+    imagesFor(keyCount) {
+        return this.imagesByKeyCount.get(keyCount) ?? this.images;
+    }
+
     get hasImages() {
-        const { note, key, hit } = this.images;
-        return note.some(Boolean) || key.some(Boolean) || Object.keys(hit).length > 0;
+        const sets = this.imagesByKeyCount.size ? [...this.imagesByKeyCount.values()] : [this.images];
+        return sets.some(images => {
+            const { note, key, hit } = images;
+            return note.some(Boolean) || key.some(Boolean) || Object.keys(hit).length > 0;
+        });
     }
 }
 
@@ -90,6 +98,7 @@ function createManiaConfig(keys) {
         hitPosition: DEFAULT_HIT_POSITION,
         widthForNoteHeightScale: 0,
         noteBodyStyle: 0,
+        imageLookups: {},
     };
 }
 
@@ -99,20 +108,25 @@ export function parseSkinIni(text) {
         author: '',
         version: '',
         configs: new Map(),
-        imageLookups: {},
     };
 
     let section = null;
     let current = null;
+    let pending = [];
 
     for (const rawLine of String(text).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').split('\n')) {
-        const line = rawLine.trim();
-        if (!line || line.startsWith('//')) continue;
+        // Section headers and values may have trailing // comments, e.g.
+        // "[Mania] //4K" or "HitPosition: 402 // stable default".
+        const comment = rawLine.indexOf('//');
+        const line = (comment >= 0 ? rawLine.slice(0, comment) : rawLine).trim();
+        if (!line || line.startsWith(';')) continue;
 
-        const header = line.match(/^\[(.+)\]$/);
+        // Only the bracketed section name matters; trailing text is a comment.
+        const header = line.match(/^\[([^\]]+)\]/);
         if (header) {
             section = header[1].trim().toLowerCase();
             current = null;
+            pending = [];
             continue;
         }
 
@@ -133,24 +147,33 @@ export function parseSkinIni(text) {
             const keys = Number.parseInt(pair.value, 10);
             if (!Number.isFinite(keys) || keys < 1 || keys > MAX_SKIN_COLUMNS) {
                 current = null;
+                pending = [];
                 continue;
             }
 
             // Duplicate key counts are ignored, matching LegacyManiaSkinDecoder.
             current = result.configs.get(keys) ?? createManiaConfig(keys);
             result.configs.set(keys, current);
+
+            // Stable accepts settings that appear before Keys in a section.
+            for (const [key, value] of pending)
+                applyManiaSetting(current, key, value);
+            pending = [];
             continue;
         }
 
-        if (!current) continue;
+        if (!current) {
+            pending.push([pair.key, pair.value]);
+            continue;
+        }
 
-        applyManiaSetting(current, pair.key, pair.value, result.imageLookups);
+        applyManiaSetting(current, pair.key, pair.value);
     }
 
     return result;
 }
 
-function applyManiaSetting(config, key, value, imageLookups) {
+function applyManiaSetting(config, key, value) {
     const lower = key.toLowerCase();
 
     switch (lower) {
@@ -192,7 +215,7 @@ function applyManiaSetting(config, key, value, imageLookups) {
     }
 
     if (/^(noteimage|keyimage|hit|lighting|stage)/i.test(key))
-        imageLookups[lower] = value;
+        config.imageLookups[lower] = value;
 }
 
 function buildImageIndex(names) {
@@ -252,23 +275,38 @@ function lookupValue(lookups, prefix, column, suffix = '') {
     return null;
 }
 
-async function loadSkinImages(zip, lookups) {
+function fallbackColumnName(keyCount, column) {
+    // osu!'s default mania layout is not column-numbered: for 4K it is
+    // 1,2,2,1; for 7K it is 1,2,1,S,1,2,1. Match LegacyManiaColumnElement.
+    if (keyCount % 2 === 1 && column === (keyCount - 1) / 2) return 'S';
+    return Math.min(column, keyCount - 1 - column) % 2 === 0 ? '1' : '2';
+}
+
+async function loadSkinImages(zip, lookups, keyCount, imageCache = new Map()) {
     const index = buildImageIndex(zip.names);
     const images = emptyImages();
 
     const load = async (base) => {
         const entryName = resolveImage(index, base);
-        return entryName ? await loadBitmap(zip, entryName) : null;
+        if (!entryName) return null;
+        if (imageCache.has(entryName)) return imageCache.get(entryName);
+
+        const image = await loadBitmap(zip, entryName);
+        imageCache.set(entryName, image);
+        return image;
     };
 
-    for (let column = 0; column < MAX_SKIN_COLUMNS; column++) {
-        const noteBase = lookupValue(lookups, 'noteimage', column) ?? `mania-note${column + 1}`;
+    const columnCount = Math.min(MAX_SKIN_COLUMNS, Math.max(1, keyCount));
+
+    for (let column = 0; column < columnCount; column++) {
+        const fallback = fallbackColumnName(keyCount, column);
+        const noteBase = lookupValue(lookups, 'noteimage', column) ?? `mania-note${fallback}`;
         images.note[column] = await load(noteBase);
         images.noteH[column] = await load(lookupValue(lookups, 'noteimage', column, 'h') ?? `${noteBase}H`);
         images.noteT[column] = await load(lookupValue(lookups, 'noteimage', column, 't') ?? `${noteBase}T`);
         images.noteL[column] = await load(lookupValue(lookups, 'noteimage', column, 'l') ?? `${noteBase}L`);
 
-        const keyBase = lookupValue(lookups, 'keyimage', column) ?? `mania-key${column + 1}`;
+        const keyBase = lookupValue(lookups, 'keyimage', column) ?? `mania-key${fallback}`;
         images.key[column] = await load(keyBase);
         images.keyD[column] = await load(lookupValue(lookups, 'keyimage', column, 'd') ?? `${keyBase}D`);
     }
@@ -292,13 +330,30 @@ async function loadSkinImages(zip, lookups) {
 
 export async function loadSkin(zip, fileName = 'skin.osk') {
     const iniEntry = zip.names.find(name => name.toLowerCase().endsWith('skin.ini'));
-    if (!iniEntry) throw new Error('No skin.ini found in this skin');
+    const parsed = iniEntry
+        ? parseSkinIni(await zip.readText(iniEntry))
+        : { name: '', author: '', version: '', configs: new Map() };
 
-    const parsed = parseSkinIni(await zip.readText(iniEntry));
     if (!parsed.configs.size && !zip.names.some(name => IMAGE_EXTENSION.test(name)))
         throw new Error('This skin has no mania configuration or images');
 
-    const images = await loadSkinImages(zip, parsed.imageLookups);
+    // Note images are configured per key count. Load a set for each configured
+    // count (or the standard layouts for an image-only skin), sharing decoded
+    // bitmaps across counts.
+    const cache = new Map();
+    const imagesByKeyCount = new Map();
+    const keyCounts = parsed.configs.size
+        ? [...parsed.configs.keys()]
+        : Array.from({ length: MAX_SKIN_COLUMNS }, (_, index) => index + 1);
+
+    for (const keys of keyCounts) {
+        const config = parsed.configs.get(keys);
+        imagesByKeyCount.set(keys, await loadSkinImages(zip, config?.imageLookups ?? {}, keys, cache));
+    }
+
+    const images = imagesByKeyCount.get(4)
+        ?? imagesByKeyCount.values().next().value
+        ?? await loadSkinImages(zip, {}, 4, cache);
 
     return new ManiaSkin({
         id: `skin-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
@@ -306,6 +361,7 @@ export async function loadSkin(zip, fileName = 'skin.osk') {
         author: parsed.author,
         configs: parsed.configs,
         images,
+        imagesByKeyCount,
         source: fileName,
     });
 }

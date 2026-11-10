@@ -128,6 +128,7 @@ export class ManiaGame {
         });
 
         const keyCount = beatmap.keyCount;
+        this.skinImages = this.skin?.imagesFor?.(keyCount) ?? this.skin?.images ?? null;
         this.skinConfig = this.skin?.configFor?.(keyCount) ?? null;
         this.keyCodes = [...(keybinds?.[keyCount] ?? KEY_LAYOUTS[keyCount] ?? KEY_LAYOUTS[4])];
         this.keyToColumn = new Map(this.keyCodes.map((code, index) => [code, index]));
@@ -718,7 +719,7 @@ export class ManiaGame {
         this.colours = columns.map((_, index) => config?.colours?.[index] ?? defaultColumnColour(index, keyCount));
         this.lightColours = columns.map((_, index) => config?.lightColours?.[index] ?? this.colours[index]);
 
-        const noteImages = this.skin?.images?.note ?? [];
+        const noteImages = this.skinImages?.note ?? [];
         const heightScale = config?.widthForNoteHeightScale ?? 0;
 
         this.noteHeights = columns.map((column, index) => {
@@ -867,7 +868,7 @@ export class ManiaGame {
         const { ctx } = this;
         const { receptorY, topY, noteHeights } = this.field;
         const distanceNow = this.beatmap.distanceAt(now);
-        const images = this.skin?.images;
+        const images = this.skinImages;
         const hideLine = this.hidden ? receptorY - this.hiddenCoverage() : null;
 
         for (const note of this.notes) {
@@ -984,7 +985,7 @@ export class ManiaGame {
 
         const { ctx } = this;
         const { receptorY } = this.field;
-        const images = this.skin?.images;
+        const images = this.skinImages;
 
         for (let column = 0; column < this.columns.length; column++) {
             const geometry = this.columns[column];
@@ -1128,7 +1129,7 @@ export class ManiaGame {
             if (!geometry) continue;
 
             const centreX = geometry.x + geometry.width / 2;
-            const hitImage = this.skin?.images?.hit?.[JUDGEMENTS[flash.result].value];
+            const hitImage = this.skinImages?.hit?.[JUDGEMENTS[flash.result].value];
 
             if (hitImage) {
                 const drawWidth = geometry.width * 1.2 * (1 + age * 0.18);

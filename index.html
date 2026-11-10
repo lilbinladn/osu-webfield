@@ -23,14 +23,29 @@
         <header class="topbar">
             <div class="logo">
                 <span class="logo-osu">osu!</span>
-                <span class="logo-mode">mania + standard</span>
+                <span class="logo-mode">webfield</span>
             </div>
-            <div class="topbar-note">osu!webfield · mania &amp; osu!standard</div>
+            <nav class="top-actions" aria-label="Quick actions">
+                <button class="tool-btn" type="button" data-quick="search" aria-label="Search beatmaps" title="Search beatmaps">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"></circle><path d="m15.5 15.5 5 5"></path></svg>
+                </button>
+                <button class="tool-btn" type="button" data-quick="library" aria-label="Beatmap library" title="Beatmap library">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>
+                </button>
+                <button class="tool-btn" type="button" data-quick="settings" aria-label="Gameplay settings" title="Gameplay settings">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h8M16 7h4M4 17h4M12 17h8"></path><circle cx="14" cy="7" r="2"></circle><circle cx="8" cy="17" r="2"></circle></svg>
+                </button>
+            </nav>
+            <div class="topbar-note">mania &amp; osu!standard</div>
         </header>
 
         <main class="menu-layout">
             <div class="drop-panel" id="drop-zone">
                 <input id="file-input" type="file" accept=".osz,.zip,.osu,.osk" multiple hidden />
+                <div class="drop-topline">
+                    <span class="drop-kicker">Featured library</span>
+                    <span class="drop-pill">mania + standard</span>
+                </div>
                 <div class="drop-symbol" aria-hidden="true">↓</div>
                 <h1>Drop an <span>.osz</span></h1>
                 <p class="drop-copy">
@@ -71,6 +86,11 @@
                     <div class="panel-head">
                         <h2>Beatmaps</h2>
                         <span id="library-count" class="muted">0 charts</span>
+                    </div>
+                    <div class="library-filter" role="group" aria-label="Filter beatmaps by mode">
+                        <button type="button" class="library-filter-btn active" data-library-filter="all" aria-pressed="true">All</button>
+                        <button type="button" class="library-filter-btn" data-library-filter="std" aria-pressed="false">osu!std</button>
+                        <button type="button" class="library-filter-btn" data-library-filter="mania" aria-pressed="false">osu!mania</button>
                     </div>
                     <ul id="beatmap-list" class="beatmap-list"></ul>
                 </section>

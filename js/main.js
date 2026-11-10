@@ -43,6 +43,10 @@ const FEATURED_MAPS = [
     { id: 7237, title: 'Butterfly' },
     { id: 700945, title: 'Ievan Polkka' },
     { id: 993703, title: 'Ievan Polkka (mania)' },
+    // Ranked 4K mania charts so the mania filter has playable entries.
+    { id: 689155, title: 'Yomi yori Kikoyu (4K mania)' },
+    { id: 919633, title: 'Blue Zenith (4K mania)' },
+    { id: 1908399, title: 'FREEDOM DiVE (4K mania)' },
     { id: 867737, title: 'The Big Black' },
     { id: 89139, title: 'Blue Zenith' },
     { id: 2405981, title: 'FREEDOM DiVE' },
@@ -102,6 +106,7 @@ const audio = new AudioEngine();
 const state = {
     beatmaps: [],
     selectedId: null,
+    libraryFilter: 'all',
     currentId: null,
     game: null,
     settings: loadSettings(),
@@ -777,11 +782,19 @@ function addBeatmap(map, zip, source) {
 
 // ---------------------------------------------------------------- library
 
-function beatmapSets() {
+function matchesLibraryFilter(map, filter = state.libraryFilter) {
+    if (filter === 'std') return map.mode === 0;
+    if (filter === 'mania') return map.mode === 3;
+    return true;
+}
+
+function beatmapSets(filter = state.libraryFilter) {
     const sets = new Map();
 
     for (const entry of state.beatmaps) {
         const map = entry.map;
+        if (!matchesLibraryFilter(map, filter)) continue;
+
         const key = `${map.artist}|${map.title}|${map.creator}`.toLowerCase();
 
         if (!sets.has(key)) sets.set(key, []);
@@ -797,6 +810,8 @@ function selectRow(item) {
 }
 
 function renderLibrary() {
+    const sets = beatmapSets(state.libraryFilter);
+    const filtered = state.beatmaps.filter(entry => matchesLibraryFilter(entry.map));
     dom.list.replaceChildren();
 
     if (!state.beatmaps.length) {
@@ -804,11 +819,16 @@ function renderLibrary() {
         empty.className = 'empty-library';
         empty.textContent = 'No charts yet. Featured maps load automatically; you can also drop an .osz or search above.';
         dom.list.append(empty);
+    } else if (!sets.length) {
+        const empty = document.createElement('li');
+        empty.className = 'empty-library';
+        empty.textContent = `No ${state.libraryFilter === 'std' ? 'osu!standard' : 'osu!mania'} charts in your library yet. Import one or switch the filter.`;
+        dom.list.append(empty);
     }
 
     const rate = resolveMods(state.mods, state.rates).rate;
 
-    for (const entries of beatmapSets()) {
+    for (const entries of sets) {
         const sorted = [...entries].sort((a, b) => (starRatingFor(a, rate) ?? 0) - (starRatingFor(b, rate) ?? 0));
         const first = sorted[0];
         const map = first.map;
@@ -890,7 +910,9 @@ function renderLibrary() {
         dom.list.append(item);
     }
 
-    dom.count.textContent = `${state.beatmaps.length} chart${state.beatmaps.length === 1 ? '' : 's'}`;
+    dom.count.textContent = state.libraryFilter === 'all'
+        ? `${state.beatmaps.length} chart${state.beatmaps.length === 1 ? '' : 's'}`
+        : `${filtered.length} of ${state.beatmaps.length} charts`;
 }
 
 function chip(text) {
@@ -1428,6 +1450,42 @@ async function downloadOnlineSet(set, button) {
 
 // -------------------------------------------------------------- event wiring
 
+function bindLibraryFilter() {
+    const buttons = [...document.querySelectorAll('[data-library-filter]')];
+
+    for (const button of buttons) {
+        button.addEventListener('click', () => {
+            state.libraryFilter = button.dataset.libraryFilter;
+
+            for (const candidate of buttons) {
+                const active = candidate === button;
+                candidate.classList.toggle('active', active);
+                candidate.setAttribute('aria-pressed', String(active));
+            }
+
+            renderLibrary();
+        });
+    }
+}
+
+function bindQuickActions() {
+    const scrollTo = selector => document.querySelector(selector)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+    for (const button of document.querySelectorAll('[data-quick]')) {
+        button.addEventListener('click', () => {
+            if (button.dataset.quick === 'search') {
+                dom.onlineQuery.focus({ preventScroll: true });
+                scrollTo('.online-panel');
+            } else if (button.dataset.quick === 'library') {
+                scrollTo('.beatmap-list');
+            } else if (button.dataset.quick === 'settings') {
+                activateTab('gameplay');
+                scrollTo('[data-panel="gameplay"]');
+            }
+        });
+    }
+}
+
 function bindEvents() {
     $('#btn-browse').addEventListener('click', () => dom.fileInput.click());
     $('#btn-pause').addEventListener('click', () => state.game?.pause());
@@ -1481,6 +1539,8 @@ bindSettings();
 bindKeyEditor();
 bindSkins();
 bindOnline();
+bindLibraryFilter();
+bindQuickActions();
 bindEvents();
 renderMods();
 renderKeyEditor();
