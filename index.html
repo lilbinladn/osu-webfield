@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>osu!webfield — osu!mania + osu!standard</title>
+    <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+    <section id="screen-menu" class="screen active">
+        <div class="ambient" aria-hidden="true"></div>
+
+        <header class="topbar">
+            <div class="logo">
+                <span class="logo-osu">osu!</span>
+                <span class="logo-mode">mania + standard</span>
+            </div>
+            <div class="topbar-note">osu!webfield · mania &amp; osu!standard</div>
+        </header>
+
+        <main class="menu-layout">
+            <div class="drop-panel" id="drop-zone">
+                <input id="file-input" type="file" accept=".osz,.zip,.osu,.osk" multiple hidden />
+                <div class="drop-symbol" aria-hidden="true">↓</div>
+                <h1>Drop an <span>.osz</span></h1>
+                <p class="drop-copy">
+                    osu!mania and osu!standard difficulties are imported. Taiko and catch are
+                    discarded. Skins (<span class="mono">.osk</span>) load as mania skins.
+                </p>
+                <div class="drop-actions">
+                    <button id="btn-browse" class="btn primary" type="button">Choose files</button>
+                    <button id="btn-demo" class="btn" type="button">Play demo chart</button>
+                </div>
+                <p id="import-status" class="import-status">No beatmaps loaded yet.</p>
+            </div>
+
+            <div class="side">
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Beatmaps</h2>
+                        <span id="library-count" class="muted">0 charts</span>
+                    </div>
+                    <ul id="beatmap-list" class="beatmap-list"></ul>
+                </section>
+
+                <section class="panel">
+                    <div class="panel-head">
+                        <h2>Setup</h2>
+                        <span class="muted">saved locally</span>
+                    </div>
+
+                    <nav class="tabs" role="tablist">
+                        <button class="tab active" type="button" data-tab="gameplay">Gameplay</button>
+                        <button class="tab" type="button" data-tab="mods">Mods</button>
+                        <button class="tab" type="button" data-tab="keys">Keys</button>
+                        <button class="tab" type="button" data-tab="skins">Skins</button>
+                    </nav>
+
+                    <div class="tab-panel active" data-panel="gameplay">
+                        <label class="setting">
+                            <span>Scroll speed <b id="opt-speed-value">20</b></span>
+                            <input id="opt-speed" type="range" min="1" max="40" step="1" value="20" />
+                        </label>
+
+                        <label class="setting">
+                            <span>Background dim <b id="opt-dim-value">70%</b></span>
+                            <input id="opt-dim" type="range" min="0" max="100" step="1" value="70" />
+                        </label>
+
+                        <label class="setting">
+                            <span>Volume <b id="opt-volume-value">70%</b></span>
+                            <input id="opt-volume" type="range" min="0" max="100" step="1" value="70" />
+                        </label>
+
+                        <label class="setting toggle">
+                            <input id="opt-auto" type="checkbox" />
+                            <span>Autoplay (watch mode)</span>
+                        </label>
+
+                        <label class="setting toggle">
+                            <input id="opt-clicks" type="checkbox" checked />
+                            <span>Click sounds</span>
+                        </label>
+
+                        <label class="setting">
+                            <span>Universal offset <b id="opt-offset-value">0 ms</b></span>
+                            <input id="opt-offset" type="range" min="-200" max="200" step="1" value="0" />
+                        </label>
+
+                        <div class="calibration">
+                            <div class="calibration-row">
+                                <span id="calibration-pulse" class="calibration-pulse" aria-hidden="true"></span>
+                                <button id="btn-calibrate" class="btn small" type="button">Start metronome</button>
+                                <button id="btn-calibrate-tap" class="btn small" type="button" hidden>Tap</button>
+                                <button id="btn-calibrate-apply" class="btn small primary" type="button" hidden>Apply</button>
+                            </div>
+                            <p id="calibrate-status" class="keys-hint calibration-status">
+                                Tap Space or the Tap button on each click to measure your offset.
+                            </p>
+                        </div>
+
+                        <p class="keys-hint">
+                            Mania defaults are osu!'s own layouts: 4K <kbd>D</kbd><kbd>F</kbd><kbd>J</kbd><kbd>K</kbd>,
+                            7K <kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><kbd>Space</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>.
+                            osu!standard uses the mouse plus <kbd>Z</kbd>/<kbd>X</kbd>. <kbd>Esc</kbd> pauses.
+                        </p>
+                    </div>
+
+                    <div class="tab-panel" data-panel="mods">
+                        <div id="mod-grid" class="mod-grid"></div>
+                        <p id="mod-summary" class="mod-summary"></p>
+                    </div>
+
+                    <div class="tab-panel" data-panel="keys">
+                        <div class="keybind-toolbar">
+                            <label class="keybind-count">
+                                <span>Layout</span>
+                                <select id="keys-count"></select>
+                            </label>
+                            <button id="btn-keys-reset" class="btn small" type="button">Reset</button>
+                        </div>
+                        <div id="keybind-rows" class="keybind-rows"></div>
+                        <p class="keys-hint">
+                            Click a key, then press the new one. Pressing <kbd>Esc</kbd> cancels.
+                            Binding a key already in use swaps the two columns.
+                        </p>
+                    </div>
+
+                    <div class="tab-panel" data-panel="skins">
+                        <div class="keybind-toolbar">
+                            <span class="muted">osu! .osk skins</span>
+                            <button id="btn-skin-import" class="btn small primary" type="button">Import .osk</button>
+                            <input id="skin-input" type="file" accept=".osk,.zip" hidden />
+                        </div>
+                        <ul id="skin-list" class="skin-list"></ul>
+                        <p class="keys-hint">
+                            Uses skin.ini <b>[Mania]</b> keys, spacing, hit position, colours and
+                            <span class="mono">mania-note/key/hit</span> sprites. Skins last for this session.
+                        </p>
+                    </div>
+                </section>
+            </div>
+        </main>
+    </section>
+
+    <section id="screen-game" class="screen">
+        <canvas id="stage"></canvas>
+
+        <div class="game-hud">
+            <div class="hud-progress"><div id="hud-progress-fill"></div></div>
+            <div class="hud-health" aria-hidden="true">
+                <div id="hud-health-fill"></div>
+            </div>
+
+            <div class="hud-song">
+                <div id="hud-title" class="hud-title">—</div>
+                <div id="hud-artist" class="hud-artist">—</div>
+                <div id="hud-diff" class="hud-diff"></div>
+            </div>
+
+            <div class="hud-stats">
+                <div id="hud-score" class="hud-score">0</div>
+                <div id="hud-acc" class="hud-acc">100.00%</div>
+            </div>
+
+            <div class="hud-center">
+                <div id="hud-judgement" class="hud-judgement"></div>
+                <div id="hud-combo" class="hud-combo"></div>
+            </div>
+
+            <div id="pause-overlay" class="pause-overlay">
+                <div class="pause-card">
+                    <h2>Paused</h2>
+                    <p>Press <kbd>Esc</kbd> to keep playing.</p>
+                    <div class="pause-actions">
+                        <button id="btn-resume" class="btn primary" type="button">Resume</button>
+                        <button id="btn-quit" class="btn" type="button">Quit to menu</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="screen-results" class="screen">
+        <div class="results-card">
+            <div class="results-head">
+                <div id="res-title" class="results-title">—</div>
+                <div id="res-diff" class="results-diff">—</div>
+                <div id="res-mods" class="results-mods"></div>
+            </div>
+
+            <div id="res-grade" class="results-grade" data-grade="S">S</div>
+            <div id="res-score" class="results-score">0</div>
+            <div id="res-acc" class="results-acc">100.00%</div>
+            <div id="res-failed" class="results-failed" hidden>Failed — health ran out</div>
+
+            <div id="res-counts" class="results-counts"></div>
+
+            <div id="res-combo" class="results-combo">Max combo 0</div>
+
+            <div class="results-actions">
+                <button id="btn-retry" class="btn primary" type="button">Retry</button>
+                <button id="btn-back" class="btn" type="button">Back to menu</button>
+            </div>
+        </div>
+    </section>
+
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
