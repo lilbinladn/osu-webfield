@@ -43,7 +43,8 @@ All asset paths are relative, so the site works from `https://<user>.github.io/<
 - Drop an `.osz` (or a bare `.osu`) anywhere on the page, then press **Play**.
   Mania and standard difficulties are imported; taiko/catch are skipped and reported.
 - Drop an `.osk` to load an osu! skin for mania, or use **Skins → Import .osk**.
-- **Play demo chart** loads the built-in mania 4K chart with a synthesised track.
+- The library loads famous and beginner mapsets on first visit (roughly 1.6★–7.8★),
+  cached by the browser after the first download.
 - Autoplay is **off by default**; enable it in **Setup → Gameplay** to watch.
 
 **osu!standard** uses the mouse (or touch) to aim and click, with `Z` / `X` / `Space` as
@@ -52,6 +53,51 @@ spinners by holding through their duration.
 
 **osu!mania** uses osu!'s own layouts (`VariantMappingGenerator`): 4K `D F J K`, 7K
 `S D F Space J K L`; edit them in **Setup → Keys**.
+
+On a touch screen, tap the mania lanes directly. osu!standard follows your finger and
+presses while you hold it, so sliders and spinners only need a finger kept down. The
+pause button sits under the score, and the menu collapses to one column on phones.
+
+## Featured maps
+
+On the first visit the library loads a starter set from the osu! mirror:
+
+- **DISCO PRINCE** — standard, 2.4★
+- **Butterfly** — standard, 1.6–3.9★
+- **Ievan Polkka** — standard, 1.6–4.9★
+- **Ievan Polkka** — 4K/7K mania, 2.4–2.5★
+- **The Big Black** — standard, 9 difficulties
+- **Blue Zenith** — standard
+- **FREEDOM DiVE** — 6K mania
+
+Each `.osz` is downloaded once and stored in the browser's Cache Storage; later page
+loads read them from that cache, so only the first visit needs the downloads. As with
+any imported map, the charts and audio are rebuilt in memory for each session.
+
+## Getting beatmaps online
+
+**Get beatmaps** in the menu searches the osu! catalogue through
+[osu.direct](https://osu.direct), a public osu! beatmap mirror. Type a song, artist or
+mapper, choose Mania, Standard or both, and press **Download**. The `.osz` is fetched in
+the browser and imported through the normal pipeline, so audio, background and every
+difficulty come with it; the **osu!** button on a result opens the official mapset page.
+
+osu.ppy.sh cannot be called directly from a static page: beatmap downloads require an
+osu! login session, its search/API responses do not send CORS headers for browser
+fetches, and the API needs OAuth. The mirror is third-party, may rate-limit or lag behind
+the official listing, and can be unavailable. Downloaded maps stay in memory for the
+session, like dropped files; featured downloads are also cached so they are not fetched
+again.
+
+## Accuracy
+
+**osu!mania** accuracy uses the 300-based weights from osu!: MAX and 300 both count
+as 100%, then 200/100/50 and a miss at 0%. The MAX judgement's 320 value only affects
+score, so a full run of 300s reports 100.00%.
+
+**osu!standard** uses the usual 300/100/50 weights. Slider ends are weighted as 150
+(osu!lazer's `SliderTailHit`) rather than as a full 300, so imperfect slider heads are
+not hidden by a perfect tail. Slider ticks and repeats are not simulated.
 
 ## Mods
 

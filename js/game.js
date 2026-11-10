@@ -1,6 +1,8 @@
 // osu!mania gameplay: judging, scoring and canvas rendering.
 // Scoring follows the ScoreV2 split used by modern osu!mania
 // (70% combo progress, 30% accuracy), with hit windows from ManiaHitWindows.
+// Accuracy uses osu!mania's 300-based weights: MAX and 300 both count as 100%;
+// the 320 MAX value only contributes to score.
 
 import { computeHitWindows } from './beatmap.js';
 import { KEY_LAYOUTS, keyLabel } from './keybinds.js';
@@ -20,6 +22,15 @@ export const JUDGEMENTS = {
 };
 
 export const JUDGEMENT_ORDER = ['perfect', 'great', 'good', 'ok', 'meh', 'miss'];
+
+const ACCURACY_VALUES = {
+    perfect: 300,
+    great: 300,
+    good: 200,
+    ok: 100,
+    meh: 50,
+    miss: 0,
+};
 
 const LIGHT_TEXT = '#e6ecff';
 const BLUE_TEXT = '#5b90ff';
@@ -143,6 +154,7 @@ export class ManiaGame {
         this.combo = 0;
         this.maxCombo = 0;
         this.accuracy = 100;
+        this.accuracySum = 0;
         this.hitSum = 0;
         this.progressSum = 0;
         this.judged = 0;
@@ -150,6 +162,7 @@ export class ManiaGame {
         this.pressed = new Array(keyCount).fill(false);
         this.holdByColumn = new Array(keyCount).fill(null);
         this.flashes = [];
+        this.pointers = new Map();
 
         this.running = false;
         this.paused = false;
@@ -167,6 +180,9 @@ export class ManiaGame {
         this._onBlur = () => {
             if (this.running && !this.paused && !this.finished) this.pause();
         };
+        this._onPointerDown = event => this.handlePointerDown(event);
+        this._onPointerUp = event => this.handlePointerUp(event);
+        this._onPointerCancel = event => this.handlePointerUp(event);
 
         this.frame = this.frame.bind(this);
         this.layout();
@@ -188,6 +204,9 @@ export class ManiaGame {
         window.addEventListener('keyup', this._onKeyUp);
         window.addEventListener('resize', this._onResize);
         window.addEventListener('blur', this._onBlur);
+        this.canvas.addEventListener('pointerdown', this._onPointerDown);
+        this.canvas.addEventListener('pointerup', this._onPointerUp);
+        this.canvas.addEventListener('pointercancel', this._onPointerCancel);
 
         const leadIn = 2600;
         this.startSongTime = Math.max(0, this.beatmap.firstTime - leadIn);
@@ -340,6 +359,7 @@ export class ManiaGame {
 
         this.counts[result]++;
         this.judged++;
+        this.accuracySum += ACCURACY_VALUES[result];
         this.hitSum += JUDGEMENTS[result].value;
 
         if (result === 'miss') {
@@ -352,7 +372,7 @@ export class ManiaGame {
         this.progressSum += this.combo;
         this.comboChangedAt = performance.now();
 
-        this.accuracy = this.judged ? this.hitSum / (320 * this.judged) * 100 : 100;
+        this.accuracy = this.judged ? this.accuracySum / (300 * this.judged) * 100 : 100;
 
         const baseScore = 300000 * (this.hitSum / (320 * this.totalJudgements))
             + 700000 * (this.progressSum / this.maxComboSum);
@@ -457,6 +477,73 @@ export class ManiaGame {
         this.pressed[column] = false;
 
         if (this.paused || this.finished) return;
+
+        this.release(column);
+    }
+
+    columnAt(clientX) {
+        if (!this.columns?.length) return -1;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const x = (clientX - rect.left) * (this.width / Math.max(1, rect.width));
+        const first = this.columns[0];
+        const last = this.columns[this.columns.length - 1];
+
+        if (x < first.x - 24 || x > last.x + last.width + 24) return -1;
+
+        let best = 0;
+        let bestDistance = Infinity;
+
+        for (let index = 0; index < this.columns.length; index++) {
+            const column = this.columns[index];
+            const distance = Math.abs(x - (column.x + column.width / 2));
+
+            if (distance < bestDistance) {
+                best = index;
+                bestDistance = distance;
+            }
+        }
+
+        return best;
+    }
+
+    handlePointerDown(event) {
+        if (!this.running || this.paused || this.finished || this.settings.auto) return;
+        if (event.pointerType === 'mouse' && event.button !== 0) return;
+
+        const column = this.columnAt(event.clientX);
+        if (column < 0) return;
+
+        event.preventDefault();
+        this.pointers.set(event.pointerId, column);
+
+        try {
+            this.canvas.setPointerCapture?.(event.pointerId);
+        } catch (error) {
+            // Pointer capture is an optimisation; the tap still works without it.
+        }
+
+        if (this.pressed[column]) return;
+
+        this.pressed[column] = true;
+        this.audio.keyDown(column);
+        this.tap(column);
+    }
+
+    handlePointerUp(event) {
+        const column = this.pointers.get(event.pointerId);
+        if (column === undefined) return;
+
+        this.pointers.delete(event.pointerId);
+
+        // Another finger may still be holding the same lane.
+        for (const held of this.pointers.values()) {
+            if (held === column) return;
+        }
+
+        this.pressed[column] = false;
+
+        if (this.paused || this.finished || this.settings.auto) return;
 
         this.release(column);
     }
@@ -567,6 +654,9 @@ export class ManiaGame {
         window.removeEventListener('keyup', this._onKeyUp);
         window.removeEventListener('resize', this._onResize);
         window.removeEventListener('blur', this._onBlur);
+        this.canvas.removeEventListener('pointerdown', this._onPointerDown);
+        this.canvas.removeEventListener('pointerup', this._onPointerUp);
+        this.canvas.removeEventListener('pointercancel', this._onPointerCancel);
     }
 
     destroy() {
@@ -668,8 +758,9 @@ export class ManiaGame {
 
         if (this.defaultLook) {
             // Classic default skin: plain black field, no lane decoration.
+            // Continue it below the receptors and notes to the bottom edge.
             ctx.fillStyle = '#000000';
-            ctx.fillRect(x, topY, fieldWidth, receptorY - topY + 20);
+            ctx.fillRect(x, topY, fieldWidth, this.height - topY);
         } else {
             ctx.fillStyle = 'rgba(6, 8, 14, 0.5)';
             ctx.fillRect(x, topY, fieldWidth, receptorY - topY + 20);

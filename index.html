@@ -2,7 +2,17 @@
 <html lang="en">
 <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="description" content="osu!webfield is a browser port of osu!mania and osu!standard. Drop an .osz, pick a chart and play — no install or dependencies." />
+    <meta name="theme-color" content="#04050a" />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="osu!webfield" />
+    <meta property="og:title" content="osu!webfield" />
+    <meta property="og:description" content="A browser port of osu!mania and osu!standard." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="osu!webfield" />
+    <meta name="twitter:description" content="A browser port of osu!mania and osu!standard." />
     <title>osu!webfield — osu!mania + osu!standard</title>
     <link rel="stylesheet" href="css/style.css" />
 </head>
@@ -24,17 +34,39 @@
                 <div class="drop-symbol" aria-hidden="true">↓</div>
                 <h1>Drop an <span>.osz</span></h1>
                 <p class="drop-copy">
-                    osu!mania and osu!standard difficulties are imported. Taiko and catch are
-                    discarded. Skins (<span class="mono">.osk</span>) load as mania skins.
+                    Famous and beginner maps load automatically on first visit. Drop any <span class="mono">.osz</span>
+                    to add osu!mania and osu!standard difficulties; taiko and catch are discarded.
+                    Skins (<span class="mono">.osk</span>) load as mania skins.
                 </p>
                 <div class="drop-actions">
                     <button id="btn-browse" class="btn primary" type="button">Choose files</button>
-                    <button id="btn-demo" class="btn" type="button">Play demo chart</button>
                 </div>
-                <p id="import-status" class="import-status">No beatmaps loaded yet.</p>
+                <p id="import-status" class="import-status">Loading featured maps…</p>
             </div>
 
             <div class="side">
+                <section class="panel online-panel">
+                    <div class="panel-head">
+                        <h2>Get beatmaps</h2>
+                        <span class="muted">osu! mirror</span>
+                    </div>
+                    <form id="online-search" class="online-search">
+                        <input id="online-query" type="search" aria-label="Search osu! beatmaps" placeholder="Song, artist or mapper" autocomplete="off" />
+                        <select id="online-mode" aria-label="Mode filter">
+                            <option value="all">Mania + standard</option>
+                            <option value="mania">Mania only</option>
+                            <option value="std">Standard only</option>
+                        </select>
+                        <button id="online-submit" class="btn small primary" type="submit">Search</button>
+                    </form>
+                    <p id="online-status" class="online-note">Search the osu! catalogue, then download the .osz straight into your library.</p>
+                    <ul id="online-results" class="online-results"></ul>
+                    <p class="online-note online-credit">
+                        Downloads come from <a href="https://osu.direct" target="_blank" rel="noreferrer">osu.direct</a>,
+                        a public osu! mirror — osu.ppy.sh blocks direct browser downloads without a login.
+                    </p>
+                </section>
+
                 <section class="panel">
                     <div class="panel-head">
                         <h2>Beatmaps</h2>
@@ -104,6 +136,10 @@
                             7K <kbd>S</kbd><kbd>D</kbd><kbd>F</kbd><kbd>Space</kbd><kbd>J</kbd><kbd>K</kbd><kbd>L</kbd>.
                             osu!standard uses the mouse plus <kbd>Z</kbd>/<kbd>X</kbd>. <kbd>Esc</kbd> pauses.
                         </p>
+                        <p class="keys-hint touch-hint">
+                            On a touch screen, tap the mania lanes or tap and hold the osu! playfield.
+                            The pause button sits below the score.
+                        </p>
                     </div>
 
                     <div class="tab-panel" data-panel="mods">
@@ -147,6 +183,7 @@
         <canvas id="stage"></canvas>
 
         <div class="game-hud">
+            <div id="low-health" class="low-health" aria-hidden="true"></div>
             <div class="hud-progress"><div id="hud-progress-fill"></div></div>
             <div class="hud-health" aria-hidden="true">
                 <div id="hud-health-fill"></div>
@@ -162,6 +199,8 @@
                 <div id="hud-score" class="hud-score">0</div>
                 <div id="hud-acc" class="hud-acc">100.00%</div>
             </div>
+
+            <button id="btn-pause" class="hud-pause" type="button" aria-label="Pause" title="Pause">II</button>
 
             <div class="hud-center">
                 <div id="hud-judgement" class="hud-judgement"></div>

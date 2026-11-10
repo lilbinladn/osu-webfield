@@ -23,6 +23,10 @@ export const STD_JUDGEMENTS = {
 
 export const STD_JUDGEMENT_ORDER = ['great', 'ok', 'meh', 'miss'];
 
+// osu!lazer weights a slider end as SliderTailHit (150), separate from its
+// 300-point slider head. Slider ticks/repeats are not simulated.
+const SLIDER_TAIL_ACCURACY = 150;
+
 const COMBO_COLOURS = ['#ff66aa', '#66ccff', '#8ef29a', '#ffe066'];
 
 export function standardHitWindows(overallDifficulty) {
@@ -138,6 +142,8 @@ export class OsuGame {
         this.combo = 0;
         this.maxCombo = 0;
         this.accuracy = 100;
+        this.accuracySum = 0;
+        this.accuracyMaxSum = 0;
         this.hitSum = 0;
         this.progressSum = 0;
         this.judged = 0;
@@ -157,10 +163,18 @@ export class OsuGame {
 
         this._onPointerMove = event => this.trackPointer(event);
         this._onPointerDown = event => {
+            if (event.pointerType === 'mouse' && event.button !== 0) return;
+
             this.trackPointer(event);
+            try {
+                this.canvas.setPointerCapture?.(event.pointerId);
+            } catch (error) {
+                // Pointer capture is an optimisation; the click still works without it.
+            }
             this.press();
         };
         this._onPointerUp = () => this.release();
+        this._onPointerCancel = () => this.release();
         this._onKeyDown = event => {
             if (event.code === 'Escape') {
                 this.emit({ type: 'pause' });
@@ -225,6 +239,7 @@ export class OsuGame {
         this.canvas.addEventListener('pointermove', this._onPointerMove);
         this.canvas.addEventListener('pointerdown', this._onPointerDown);
         this.canvas.addEventListener('pointerup', this._onPointerUp);
+        this.canvas.addEventListener('pointercancel', this._onPointerCancel);
 
         const leadIn = 2200;
         this.startSongTime = Math.max(0, this.beatmap.firstTime - leadIn);
@@ -419,6 +434,10 @@ export class OsuGame {
 
         this.counts[result]++;
         this.judged++;
+        this.accuracySum += tail
+            ? (result === 'miss' ? 0 : SLIDER_TAIL_ACCURACY)
+            : STD_JUDGEMENTS[result].value;
+        this.accuracyMaxSum += tail ? SLIDER_TAIL_ACCURACY : 300;
         this.hitSum += STD_JUDGEMENTS[result].value;
 
         if (result === 'miss') {
@@ -430,7 +449,7 @@ export class OsuGame {
 
         this.progressSum += this.combo;
 
-        this.accuracy = this.judged ? this.hitSum / (300 * this.judged) * 100 : 100;
+        this.accuracy = this.accuracyMaxSum ? this.accuracySum / this.accuracyMaxSum * 100 : 100;
 
         const baseScore = 300000 * (this.hitSum / (300 * this.totalJudgements))
             + 700000 * (this.progressSum / this.maxComboSum);
@@ -646,6 +665,7 @@ export class OsuGame {
         this.canvas.removeEventListener('pointermove', this._onPointerMove);
         this.canvas.removeEventListener('pointerdown', this._onPointerDown);
         this.canvas.removeEventListener('pointerup', this._onPointerUp);
+        this.canvas.removeEventListener('pointercancel', this._onPointerCancel);
     }
 
     destroy() {

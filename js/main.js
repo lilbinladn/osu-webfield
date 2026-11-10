@@ -4,7 +4,6 @@ import { parseOsu, parseOsuStandard, AUDIO_EXTENSIONS } from './beatmap.js';
 import { readZip } from './zip.js';
 import { AudioEngine } from './audio.js';
 import { ManiaGame, JUDGEMENTS, JUDGEMENT_ORDER } from './game.js';
-import { buildDemoChart, createDemoMusic } from './demo.js';
 import { MODS, MOD_CONFLICTS, rateFor, resolveMods } from './mods.js';
 import {
     SUPPORTED_KEY_COUNTS,
@@ -36,6 +35,20 @@ const DEFAULT_SETTINGS = {
 
 const DEFAULT_RATES = { DT: 1.5, HT: 0.75 };
 
+// Famous mapsets are fetched once from the public mirror and then served from
+// Cache Storage, so a reload does not download them again.
+const FEATURED_CACHE = 'osu-webfield-featured-v1';
+const FEATURED_MAPS = [
+    { id: 1, title: 'DISCO PRINCE' },
+    { id: 7237, title: 'Butterfly' },
+    { id: 700945, title: 'Ievan Polkka' },
+    { id: 993703, title: 'Ievan Polkka (mania)' },
+    { id: 867737, title: 'The Big Black' },
+    { id: 89139, title: 'Blue Zenith' },
+    { id: 2405981, title: 'FREEDOM DiVE' },
+];
+let featuredStarted = false;
+
 const dom = {
     screens: document.querySelectorAll('.screen'),
     dropZone: $('#drop-zone'),
@@ -50,6 +63,13 @@ const dom = {
     judgement: $('#hud-judgement'),
     progress: $('#hud-progress-fill'),
     health: $('#hud-health-fill'),
+    vignette: $('#low-health'),
+    onlineForm: $('#online-search'),
+    onlineQuery: $('#online-query'),
+    onlineMode: $('#online-mode'),
+    onlineSubmit: $('#online-submit'),
+    onlineStatus: $('#online-status'),
+    onlineResults: $('#online-results'),
     title: $('#hud-title'),
     artist: $('#hud-artist'),
     diff: $('#hud-diff'),
@@ -657,6 +677,71 @@ async function importCharts(files) {
 
     setStatus(parts.join(' · ') || 'Nothing to import.');
     renderLibrary();
+
+    return { imported, skipped, failed };
+}
+
+// ---------------------------------------------------------------- featured
+
+async function featuredBlob(id) {
+    const url = `https://osu.direct/api/d/${id}`;
+    let cache = null;
+
+    try {
+        if ('caches' in window) {
+            cache = await caches.open(FEATURED_CACHE);
+            const cached = await cache.match(url);
+            if (cached?.ok) return cached.blob();
+        }
+    } catch (error) {
+        console.warn('Featured map cache unavailable', error);
+        cache = null;
+    }
+
+    const response = await fetch(url);
+
+    if (!response.ok) throw new Error(`the mirror returned ${response.status}`);
+
+    if (cache) {
+        try {
+            await cache.put(url, response.clone());
+        } catch (error) {
+            console.warn('Featured map could not be cached', error);
+        }
+    }
+
+    return response.blob();
+}
+
+async function seedFeatured() {
+    if (featuredStarted || state.beatmaps.length) return;
+
+    featuredStarted = true;
+    let imported = 0;
+    let failures = 0;
+
+    for (const [index, featured] of FEATURED_MAPS.entries()) {
+        try {
+            setStatus(`Loading featured maps… ${index + 1}/${FEATURED_MAPS.length}`);
+            const blob = await featuredBlob(featured.id);
+            if (blob.size < 1024) throw new Error('the download was empty');
+
+            const file = new File([blob], `${featured.title}.osz`, { type: 'application/zip' });
+            const result = await importCharts([file]);
+            imported += result.imported;
+        } catch (error) {
+            failures++;
+            console.warn(`Featured map ${featured.title} could not be loaded`, error);
+        }
+    }
+
+    if (imported) {
+        setStatus(`Featured maps ready — ${imported} chart${imported === 1 ? '' : 's'} added. Download more above.`);
+    } else if (!state.beatmaps.length) {
+        setStatus('Featured maps could not load. Search above or drop an .osz.', true);
+    } else if (failures) {
+        setStatus('Some featured maps could not load; your imported charts are ready.');
+    }
 }
 
 function parseChart(text, name) {
@@ -687,7 +772,6 @@ function addBeatmap(map, zip, source) {
         map,
         zip,
         source,
-        demo: false,
     });
 }
 
@@ -718,7 +802,7 @@ function renderLibrary() {
     if (!state.beatmaps.length) {
         const empty = document.createElement('li');
         empty.className = 'empty-library';
-        empty.textContent = 'No charts yet. Drop an .osz above, or start with the built-in demo.';
+        empty.textContent = 'No charts yet. Featured maps load automatically; you can also drop an .osz or search above.';
         dom.list.append(empty);
     }
 
@@ -863,11 +947,6 @@ async function playBeatmap(id) {
 async function loadAssets(entry, game) {
     const map = entry.map;
 
-    if (entry.demo) {
-        game.setMusic(createDemoMusic(audio.ensure()));
-        return;
-    }
-
     if (!entry.zip) {
         setStatus('Chart loaded without audio. Drop the .osz to get the song too.');
         return;
@@ -931,6 +1010,8 @@ function resetHud(entry) {
     dom.judgement.classList.remove('pop');
     dom.progress.style.width = '0%';
     dom.health.style.width = '100%';
+    dom.vignette.style.opacity = '0';
+    dom.vignette.classList.remove('critical');
 }
 
 function handleGameEvent(event) {
@@ -963,12 +1044,19 @@ function handleGameEvent(event) {
 }
 
 function updateHud({ score, combo, accuracy, progress, health }) {
+    const healthRatio = clamp01(health);
+
     dom.score.textContent = score.toLocaleString();
     dom.accuracy.textContent = `${accuracy.toFixed(2)}%`;
     dom.combo.textContent = combo > 1 ? String(combo) : '';
     dom.combo.classList.toggle('visible', combo > 1);
     dom.progress.style.width = `${(progress * 100).toFixed(2)}%`;
-    dom.health.style.width = `${(clamp01(health) * 100).toFixed(2)}%`;
+    dom.health.style.width = `${(healthRatio * 100).toFixed(2)}%`;
+
+    // Red edges ramp in below 35% health and pulse in the last 15%.
+    const danger = Math.max(0, Math.min(1, (0.35 - healthRatio) / 0.35));
+    dom.vignette.style.opacity = (danger * 0.9).toFixed(2);
+    dom.vignette.classList.toggle('critical', healthRatio > 0 && healthRatio <= 0.15);
 }
 
 const clamp01 = value => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 1));
@@ -1057,28 +1145,6 @@ function backToMenu() {
     document.body.classList.remove('mode-std');
     setScreen('menu');
     renderLibrary();
-}
-
-// ------------------------------------------------------------------- demo
-
-function playDemo() {
-    let entry = state.beatmaps.find(candidate => candidate.demo);
-
-    if (!entry) {
-        const map = parseOsu(buildDemoChart(), 'demo.osu');
-        entry = {
-            id: uid(),
-            key: `demo|${map.version}|${map.keyCount}`,
-            map,
-            zip: null,
-            source: 'Built-in demo',
-            demo: true,
-        };
-        state.beatmaps.unshift(entry);
-        renderLibrary();
-    }
-
-    playBeatmap(entry.id);
 }
 
 // ---------------------------------------------------------------- settings
@@ -1170,11 +1236,201 @@ function bindSkins() {
     });
 }
 
+// ------------------------------------------------------------ online beatmaps
+
+let onlineSets = [];
+let onlineSearchToken = 0;
+
+const ONLINE_MODE_IDS = new Map([['osu', 0], ['taiko', 1], ['fruits', 2], ['mania', 3]]);
+
+function bindOnline() {
+    dom.onlineForm.addEventListener('submit', event => {
+        event.preventDefault();
+        searchOnline();
+    });
+
+    dom.onlineMode.addEventListener('change', () => {
+        if (onlineSets.length) renderOnlineResults(onlineSets, dom.onlineMode.value);
+    });
+}
+
+function setOnlineStatus(message, error = false) {
+    dom.onlineStatus.textContent = message;
+    dom.onlineStatus.classList.toggle('error', error);
+}
+
+async function searchOnline() {
+    const query = dom.onlineQuery.value.trim();
+
+    if (!query) {
+        onlineSearchToken++;
+        onlineSets = [];
+        dom.onlineSubmit.disabled = false;
+        dom.onlineResults.replaceChildren();
+        setOnlineStatus('Type a song, artist or mapper to search.', true);
+        dom.onlineQuery.focus();
+        return;
+    }
+
+    const token = ++onlineSearchToken;
+    onlineSets = [];
+    dom.onlineSubmit.disabled = true;
+    dom.onlineResults.replaceChildren();
+    setOnlineStatus('Searching osu! beatmaps…');
+
+    try {
+        const response = await fetch(`https://osu.direct/api/v2/search?q=${encodeURIComponent(query)}&limit=50`);
+
+        if (!response.ok) throw new Error(`search returned ${response.status}`);
+
+        const data = await response.json();
+        if (token !== onlineSearchToken) return;
+
+        onlineSets = Array.isArray(data) ? data : [];
+        renderOnlineResults(onlineSets, dom.onlineMode.value);
+    } catch (error) {
+        if (token !== onlineSearchToken) return;
+
+        console.warn('Online beatmap search failed', error);
+        setOnlineStatus(`Search failed: ${error.message}. Check your connection and try again.`, true);
+    } finally {
+        if (token === onlineSearchToken) dom.onlineSubmit.disabled = false;
+    }
+}
+
+function modeIdsForSet(set) {
+    return new Set((set.beatmaps ?? []).map(beatmap => beatmap.mode_int ?? ONLINE_MODE_IDS.get(beatmap.mode)));
+}
+
+function renderOnlineResults(sets, mode) {
+    dom.onlineResults.replaceChildren();
+
+    const results = sets
+        .filter(set => set.id && !set.nsfw && !set.deleted_at)
+        .filter(set => {
+            const modes = modeIdsForSet(set);
+            if (mode === 'mania') return modes.has(3);
+            if (mode === 'std') return modes.has(0);
+            return modes.has(3) || modes.has(0);
+        })
+        .slice(0, 24);
+
+    if (!results.length) {
+        const empty = document.createElement('li');
+        empty.className = 'empty-library';
+        empty.textContent = 'No playable mapsets matched. Try another search or mode.';
+        dom.onlineResults.append(empty);
+        setOnlineStatus('No playable mapsets matched that search.', true);
+        return;
+    }
+
+    for (const set of results) dom.onlineResults.append(onlineResultItem(set));
+
+    setOnlineStatus(`${results.length} mapset${results.length === 1 ? '' : 's'} found — download a .osz below.`);
+}
+
+function onlineResultItem(set) {
+    const item = document.createElement('li');
+    item.className = 'online-item';
+
+    const info = document.createElement('div');
+    info.className = 'online-info';
+
+    const title = document.createElement('div');
+    title.className = 'online-title';
+    title.textContent = set.title || 'Untitled';
+
+    const sub = document.createElement('div');
+    sub.className = 'online-sub';
+    sub.textContent = `${set.artist || 'Unknown artist'} · ${set.creator || 'Unknown mapper'}`;
+
+    const tags = document.createElement('div');
+    tags.className = 'online-tags';
+    tags.append(chip(set.status || 'unranked'));
+
+    const modes = modeIdsForSet(set);
+    if (modes.has(3)) tags.append(chip('Mania'));
+    if (modes.has(0)) tags.append(chip('Std'));
+    tags.append(chip(`${set.beatmaps?.length ?? 0} diff`));
+
+    info.append(title, sub, tags);
+
+    const actions = document.createElement('div');
+    actions.className = 'online-actions';
+
+    const open = document.createElement('a');
+    open.className = 'btn small';
+    open.href = `https://osu.ppy.sh/beatmapsets/${set.id}`;
+    open.target = '_blank';
+    open.rel = 'noreferrer';
+    open.textContent = 'osu!';
+    open.title = 'Open this mapset on osu.ppy.sh';
+
+    const download = document.createElement('button');
+    download.type = 'button';
+    download.className = 'btn small primary';
+    download.textContent = 'Download';
+    download.title = 'Download the .osz from osu.direct';
+    download.addEventListener('click', () => downloadOnlineSet(set, download));
+
+    actions.append(open, download);
+    item.append(info, actions);
+    return item;
+}
+
+function onlineFileName(set) {
+    const base = `${set.artist || 'beatmap'} - ${set.title || set.id}`
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+
+    return `${base || `beatmap-${set.id}`}.osz`;
+}
+
+async function downloadOnlineSet(set, button) {
+    if (button.disabled) return;
+
+    const label = button.textContent;
+    button.disabled = true;
+    button.textContent = 'Wait…';
+    setOnlineStatus(`Downloading ${set.artist || 'mapset'} — ${set.title || set.id}…`);
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 90000);
+
+    try {
+        const response = await fetch(`https://osu.direct/api/d/${set.id}`, { signal: controller.signal });
+
+        if (!response.ok) throw new Error(`download returned ${response.status}`);
+
+        const blob = await response.blob();
+        if (blob.size < 1024) throw new Error('the download was empty');
+
+        const file = new File([blob], onlineFileName(set), { type: 'application/zip' });
+        const result = await importCharts([file]);
+
+        if (result.imported) {
+            setOnlineStatus(`Added ${result.imported} chart${result.imported === 1 ? '' : 's'} from “${set.title || set.id}”.`);
+        } else {
+            setOnlineStatus('Downloaded, but it contained no playable mania or standard charts.', true);
+        }
+    } catch (error) {
+        console.warn('Online beatmap download failed', error);
+        const reason = error.name === 'AbortError' ? 'the download timed out' : error.message;
+        setOnlineStatus(`Download failed: ${reason}. Use the osu! button to open it on the website.`, true);
+    } finally {
+        clearTimeout(timer);
+        button.disabled = false;
+        button.textContent = label;
+    }
+}
+
 // -------------------------------------------------------------- event wiring
 
 function bindEvents() {
     $('#btn-browse').addEventListener('click', () => dom.fileInput.click());
-    $('#btn-demo').addEventListener('click', playDemo);
+    $('#btn-pause').addEventListener('click', () => state.game?.pause());
 
     dom.fileInput.addEventListener('change', () => {
         handleFiles(dom.fileInput.files);
@@ -1224,8 +1480,10 @@ bindTabs();
 bindSettings();
 bindKeyEditor();
 bindSkins();
+bindOnline();
 bindEvents();
 renderMods();
 renderKeyEditor();
 renderSkins();
 renderLibrary();
+seedFeatured();

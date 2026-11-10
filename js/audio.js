@@ -205,24 +205,52 @@ export class AudioEngine {
         this.blip({ frequency: 1440 + column * 60, duration: 0.03, type: 'sine', gain: 0.08 });
     }
 
+    // Distinct low "thud" for misses: a descending tone plus a short noise
+    // burst, louder and longer than the key click so it reads as a penalty.
     miss() {
-        if (!this.ctx) return;
+        if (!this.ctx || !this.sfxGain) return;
 
         const ctx = this.ctx;
         const time = ctx.currentTime;
+
         const oscillator = ctx.createOscillator();
         const envelope = ctx.createGain();
 
         oscillator.type = 'sawtooth';
-        oscillator.frequency.setValueAtTime(160, time);
-        oscillator.frequency.exponentialRampToValueAtTime(70, time + 0.12);
+        oscillator.frequency.setValueAtTime(190, time);
+        oscillator.frequency.exponentialRampToValueAtTime(58, time + 0.22);
 
-        envelope.gain.setValueAtTime(0.18, time);
-        envelope.gain.exponentialRampToValueAtTime(0.0001, time + 0.14);
+        envelope.gain.setValueAtTime(0.0001, time);
+        envelope.gain.exponentialRampToValueAtTime(0.32, time + 0.006);
+        envelope.gain.exponentialRampToValueAtTime(0.0001, time + 0.26);
 
         oscillator.connect(envelope);
         envelope.connect(this.sfxGain);
         oscillator.start(time);
-        oscillator.stop(time + 0.16);
+        oscillator.stop(time + 0.28);
+
+        const duration = 0.12;
+        const buffer = ctx.createBuffer(1, Math.max(1, Math.ceil(ctx.sampleRate * duration)), ctx.sampleRate);
+        const data = buffer.getChannelData(0);
+
+        for (let i = 0; i < data.length; i++) {
+            const progress = i / data.length;
+            data[i] = (Math.random() * 2 - 1) * Math.pow(1 - progress, 3);
+        }
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+
+        const filter = ctx.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 950;
+
+        const noiseGain = ctx.createGain();
+        noiseGain.gain.value = 0.5;
+
+        source.connect(filter);
+        filter.connect(noiseGain);
+        noiseGain.connect(this.sfxGain);
+        source.start(time);
     }
 }
