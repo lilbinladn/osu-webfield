@@ -51,7 +51,9 @@
                 <p class="drop-copy">
                     Famous and beginner maps load automatically on first visit. Drop any <span class="mono">.osz</span>
                     to add osu!mania and osu!standard difficulties; taiko and catch are discarded.
-                    Skins (<span class="mono">.osk</span>) load as mania skins.
+                    Skins (<span class="mono">.osk</span>) load as mania skins. Maps you import are
+                    <span class="mono">saved in this browser</span> — select one to hear its song, or
+                    delete it from the library.
                 </p>
                 <div class="drop-actions">
                     <button id="btn-browse" class="btn primary" type="button">Choose files</button>
@@ -60,6 +62,45 @@
             </div>
 
             <div class="side">
+                <section class="panel account-panel">
+                    <div class="panel-head">
+                        <h2>Account</h2>
+                        <span id="account-badge" class="muted">loading…</span>
+                    </div>
+
+                    <div class="account-identity">
+                        <div id="account-avatar" class="account-avatar" aria-hidden="true">?</div>
+                        <div class="account-identity-fields">
+                            <input id="account-name" type="text" maxlength="32" placeholder="Your webfield name" aria-label="Account name" autocomplete="off" />
+                            <button id="btn-account-save" class="btn small primary" type="button">Save name</button>
+                        </div>
+                    </div>
+
+                    <div id="account-stats" class="account-stats"></div>
+
+                    <div class="account-row">
+                        <input id="osu-profile" type="text" placeholder="osu! profile link or user ID" aria-label="osu! profile" autocomplete="off" />
+                        <button id="btn-osu-link" class="btn small" type="button">Link</button>
+                        <button id="btn-osu-unlink" class="btn small" type="button" hidden>Unlink</button>
+                    </div>
+                    <p id="osu-link-status" class="keys-hint">Link your osu! profile to show your avatar and open saved sets on osu.ppy.sh.</p>
+
+                    <div class="account-sync">
+                        <textarea id="sync-code" class="sync-code" rows="2" placeholder="Sync code — copy your own, or paste one to import an account." spellcheck="false" aria-label="Account sync code"></textarea>
+                        <div class="account-row">
+                            <button id="btn-sync-copy" class="btn small" type="button">Copy my code</button>
+                            <button id="btn-sync-apply" class="btn small primary" type="button">Apply code</button>
+                        </div>
+                        <p id="sync-status" class="keys-hint">A sync code carries this account, its play history and its osu! link to another browser or device.</p>
+                    </div>
+
+                    <p class="keys-hint">
+                        osu! does not let web pages sign in or submit plays: its API sends no CORS headers and
+                        OAuth needs a client secret. This account lives in your browser, and the sync code is
+                        how it travels. Saved maps can still be downloaded as <span class="mono">.osz</span> for osu!.
+                    </p>
+                </section>
+
                 <section class="panel online-panel">
                     <div class="panel-head">
                         <h2>Get beatmaps</h2>
@@ -197,6 +238,19 @@
                 </section>
             </div>
         </main>
+
+        <div id="preview-bar" class="preview-bar" hidden>
+            <button id="preview-toggle" class="preview-toggle" type="button" aria-label="Pause preview">❚❚</button>
+            <div class="preview-meta">
+                <b id="preview-title">—</b>
+                <span id="preview-sub"></span>
+            </div>
+            <div id="preview-track" class="preview-track" role="slider" aria-label="Preview position" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+                <div id="preview-fill"></div>
+            </div>
+            <span id="preview-time" class="preview-time">0:00 / 0:00</span>
+            <button id="preview-close" class="preview-close" type="button" aria-label="Stop preview">✕</button>
+        </div>
     </section>
 
     <section id="screen-game" class="screen">

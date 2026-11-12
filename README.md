@@ -17,18 +17,44 @@ Pages can serve it as-is.
 ## Run it
 
 ES modules need to be served over HTTP (opening `index.html` from disk is blocked by
-module CORS rules). Any static server works:
+module CORS rules). There is nothing to install and no build step; any static server
+works, on any OS:
 
 ```bash
-python -m http.server 8080
+# Linux / macOS (Python 3)
+python3 -m http.server 8080
+
+# Windows (installed Python, "py" launcher)
+py -m http.server 8080
+
+# anywhere with Node
+npx serve .
+
 # then open http://localhost:8080
 ```
 
-Or with Node:
+Serve from inside this folder (or from a copy of its contents): `index.html` loads
+`css/` and `js/` by relative paths.
 
-```bash
-npx serve .
-```
+## Platforms and browsers
+
+Everything is plain ES modules, canvas, Web Audio and IndexedDB, so the same files run
+on Linux, macOS, Windows, ChromeOS, Android and iOS — no OS-specific code and no native
+install. Any current Chromium, Firefox or Safari works; `.osz` import needs
+`DecompressionStream`, which means Safari 16.4 or newer.
+
+Nothing platform-specific is required, and missing browser features degrade instead of
+breaking the page:
+
+| Missing | What happens |
+| --- | --- |
+| IndexedDB (private browsing, quota) | maps and the account work for the session; the status line says they were not saved |
+| a secure context (a LAN `http://` address, e.g. a phone pointed at your desktop) | **Copy my code** falls back to selecting the code and the legacy copy command |
+| audio support for a file | that map plays silently with synthesised hitsounds, and previews report why |
+| a download target on iOS Safari | the `.osz` still opens, but Safari may display it instead of saving it |
+
+Downloads are renamed to a filename that is valid on Windows, macOS, Android and Linux
+(`:`, `?`, `*`, quotes, control characters and dot-only names are replaced).
 
 ## Deploy on GitHub Pages
 
@@ -74,9 +100,9 @@ On the first visit the library loads a starter set from the osu! mirror:
 
 Use the **All / osu!std / osu!mania** buttons above the library to filter charts.
 
-Each `.osz` is downloaded once and stored in the browser's Cache Storage; later page
-loads read them from that cache, so only the first visit needs the downloads. As with
-any imported map, the charts and audio are rebuilt in memory for each session.
+Each `.osz` is downloaded once and saved in the browser (IndexedDB); later page loads
+rebuild the charts from that saved copy, so only the first visit needs the downloads.
+Featured downloads are also cached in Cache Storage.
 
 ## Getting beatmaps online
 
@@ -89,9 +115,44 @@ difficulty come with it; the **osu!** button on a result opens the official maps
 osu.ppy.sh cannot be called directly from a static page: beatmap downloads require an
 osu! login session, its search/API responses do not send CORS headers for browser
 fetches, and the API needs OAuth. The mirror is third-party, may rate-limit or lag behind
-the official listing, and can be unavailable. Downloaded maps stay in memory for the
-session, like dropped files; featured downloads are also cached so they are not fetched
-again.
+the official listing, and can be unavailable. Downloaded maps are saved in the browser
+like any other import (see below).
+
+## Saved library
+
+Every imported `.osz` (or bare `.osu`) is written to IndexedDB together with its file,
+so the library survives a reload and needs no network after the first visit. Each row in
+**Beatmaps** can be:
+
+- **clicked** or given the ♪ button — plays the song from the map's `PreviewTime`, with a
+  pause/seek bar at the bottom of the page
+- **↓** — downloads the original `.osz`, which you can drop into osu! to import it
+- **osu!** — opens the mapset on osu.ppy.sh (maps downloaded in the app know their id)
+- **✕** — deletes the whole mapset from your library and from browser storage (click
+  twice: the button arms itself first)
+
+Deleting every map does not bring the featured set back; it only seeds the library once.
+If browser storage is full the import still works for the session and the status line
+says it could not be saved.
+
+## Account and syncing
+
+The **Account** panel keeps a local profile: a name, an osu! profile link, and every
+finished or failed attempt as a play (score, accuracy, grade, combo, mods, length). The
+panel shows plays, average accuracy, best score and grade, top combo and time played.
+
+osu! does not allow a web page to sign in or submit plays: its API sends no CORS headers
+for browser requests, OAuth needs a client secret, and there is no public score-submission
+endpoint. So the account lives in this browser and syncs by **sync code**:
+
+- **Copy my code** writes a compact Base64 code of the profile, osu! link and play history
+  (and copies it to the clipboard)
+- paste a code on another browser or device and press **Apply code** — plays are merged by
+  id, so syncing back and forth never duplicates or drops a play
+
+Linking an osu! profile (`osu.ppy.sh/users/12345`, or just the user id) is an identity
+reference: it shows the profile's avatar from `a.ppy.sh` and links back to osu!ppy.sh.
+The link and the account are included in the sync code.
 
 ## Accuracy
 
@@ -212,6 +273,8 @@ slider ticks and spinner bonus, animated skin frames, standard star rating.
 
 ## Limits
 
+- The library lives in IndexedDB (per browser profile); the account sync code is the only
+  way to move an account, since osu! offers no browser sign-in.
 - Mania: 1–10 keys, single stage. Standard: circles, sliders and spinners.
 - Standard sliders are scored as head + tail; slider ticks and repeat judgements are not
   simulated. Spinners only check that the button is held to the end (no spin bonus).

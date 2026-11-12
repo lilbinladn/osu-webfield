@@ -2507,3 +2507,323 @@ kbd {
         animation-iteration-count: 1 !important;
     }
 }
+
+/* ------------------------------------------------------ account + preview */
+
+.account-panel .panel-head {
+    margin-bottom: 10px;
+}
+
+.account-identity {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.account-avatar {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    overflow: hidden;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--pink), var(--blue));
+    color: #11060d;
+    font-size: 13px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+}
+
+.account-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.account-identity-fields {
+    display: flex;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+}
+
+.account-panel input[type="text"],
+.sync-code {
+    min-width: 0;
+    flex: 1;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 10px;
+    background: rgba(9, 12, 20, 0.75);
+    color: var(--text);
+    font: inherit;
+    font-size: 12px;
+}
+
+.account-panel input[type="text"]:focus-visible,
+.sync-code:focus-visible {
+    border-color: rgba(102, 204, 255, 0.5);
+    outline: none;
+}
+
+.account-stats {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin: 12px 0;
+}
+
+.account-stat {
+    min-width: 0;
+    padding: 7px 9px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.account-stat span {
+    display: block;
+    font-size: 9px;
+    letter-spacing: 1.1px;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-stat b {
+    display: block;
+    margin-top: 2px;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.account-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.account-osu,
+.account-sync {
+    margin-bottom: 10px;
+}
+
+.account-panel .keys-hint {
+    margin: 8px 0 0;
+}
+
+.sync-code {
+    width: 100%;
+    margin-bottom: 6px;
+    resize: vertical;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    line-height: 1.5;
+    word-break: break-all;
+}
+
+#osu-link-status a {
+    color: var(--blue);
+    text-decoration: none;
+}
+
+#osu-link-status a:hover {
+    text-decoration: underline;
+}
+
+/* Library row actions */
+
+.beatmap-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.icon-btn {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(231, 236, 246, 0.68);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    cursor: pointer;
+    transition: color 140ms ease, background 140ms ease, border-color 140ms ease;
+}
+
+.icon-btn:hover,
+.icon-btn:focus-visible {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text);
+    outline: none;
+}
+
+.icon-btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.icon-btn.playing {
+    border-color: transparent;
+    background: var(--blue);
+    color: #061019;
+}
+
+.icon-btn.danger-confirm {
+    border-color: transparent;
+    background: #ff6f88;
+    color: #190611;
+    font-size: 9px;
+}
+
+/* Song preview bar */
+
+.preview-bar {
+    position: fixed;
+    left: 50%;
+    bottom: 16px;
+    transform: translateX(-50%);
+    z-index: 40;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: min(780px, calc(100vw - 28px));
+    padding: 9px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 14px;
+    background: rgba(8, 11, 18, 0.93);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(14px);
+}
+
+.preview-bar[hidden] {
+    display: none;
+}
+
+.preview-toggle {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: linear-gradient(135deg, var(--pink) 0%, var(--blue) 140%);
+    color: #18060f;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.preview-toggle.loading {
+    opacity: 0.55;
+}
+
+.preview-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    width: 210px;
+    min-width: 0;
+}
+
+.preview-meta b {
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preview-meta span {
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.preview-track {
+    flex: 1;
+    height: 4px;
+    min-width: 60px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.13);
+    overflow: hidden;
+    cursor: pointer;
+}
+
+.preview-track:focus-visible {
+    outline: 1px solid rgba(102, 204, 255, 0.6);
+    outline-offset: 3px;
+}
+
+#preview-fill {
+    height: 100%;
+    width: 0;
+    background: linear-gradient(90deg, var(--pink), var(--blue));
+}
+
+.preview-time {
+    font-size: 10px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.preview-close {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    font-size: 11px;
+    cursor: pointer;
+}
+
+.preview-close:hover {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text);
+}
+
+/* Keep the preview bar clear of the last panel. */
+body.previewing .menu-layout {
+    padding-bottom: 106px;
+}
+
+@media (max-width: 700px) {
+    .account-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .preview-meta {
+        width: 108px;
+    }
+
+    .preview-time {
+        display: none;
+    }
+
+    .beatmap-tags {
+        display: none;
+    }
+}

@@ -16,6 +16,25 @@ import {
 import { DEFAULT_SKIN, loadSkin } from './skin.js';
 import { computeStarRating } from './difficulty.js';
 import { OsuGame, STD_JUDGEMENTS, STD_JUDGEMENT_ORDER } from './stdgame.js';
+import {
+    listBeatmapsets,
+    saveBeatmapset,
+    deleteBeatmapset,
+    loadProfile,
+    saveProfile,
+} from './storage.js';
+import {
+    defaultProfile,
+    mergeProfiles,
+    parseOsuProfile,
+    osuProfileUrl,
+    profileStats,
+    recordPlay,
+    encodeSyncCode,
+    decodeSyncCode,
+    sanitiseProfile,
+} from './account.js';
+import { PreviewPlayer } from './preview.js';
 
 const $ = selector => document.querySelector(selector);
 
@@ -23,6 +42,9 @@ const $ = selector => document.querySelector(selector);
 const SETTINGS_KEY = 'osu-web-settings-v2';
 const MODS_KEY = 'osu-web-mods';
 const RATES_KEY = 'osu-web-rates';
+// Set once the starter maps or a saved mapset exist, so deleting every map is
+// not undone by the featured seeding on the next visit.
+const SEEDED_KEY = 'osu-web-library-seeded';
 
 const DEFAULT_SETTINGS = {
     scrollSpeed: 20,
@@ -99,15 +121,38 @@ const dom = {
     keyRows: $('#keybind-rows'),
     skinList: $('#skin-list'),
     skinInput: $('#skin-input'),
+    accountName: $('#account-name'),
+    accountSave: $('#btn-account-save'),
+    accountBadge: $('#account-badge'),
+    accountAvatar: $('#account-avatar'),
+    accountStats: $('#account-stats'),
+    osuProfile: $('#osu-profile'),
+    osuLink: $('#btn-osu-link'),
+    osuUnlink: $('#btn-osu-unlink'),
+    osuLinkStatus: $('#osu-link-status'),
+    syncCode: $('#sync-code'),
+    syncStatus: $('#sync-status'),
+    syncCopy: $('#btn-sync-copy'),
+    syncApply: $('#btn-sync-apply'),
+    previewBar: $('#preview-bar'),
+    previewTitle: $('#preview-title'),
+    previewSub: $('#preview-sub'),
+    previewToggle: $('#preview-toggle'),
+    previewTrack: $('#preview-track'),
+    previewFill: $('#preview-fill'),
+    previewTime: $('#preview-time'),
+    previewClose: $('#preview-close'),
 };
 
 const audio = new AudioEngine();
+const preview = new PreviewPlayer({ onState: renderPreview });
 
 const state = {
     beatmaps: [],
     selectedId: null,
     libraryFilter: 'all',
     currentId: null,
+    profile: null,
     game: null,
     settings: loadSettings(),
     mods: loadMods(),
@@ -225,6 +270,9 @@ function startCalibration() {
         stopCalibration();
         return;
     }
+
+    // A song preview would fight the metronome, so end it first.
+    preview.stop();
 
     audio.ensure();
     audio.resume();
@@ -624,12 +672,13 @@ async function handleFiles(files) {
         await importCharts(charts);
 }
 
-async function importCharts(files) {
+async function importCharts(files, { persist = true, beatmapsetId = null } = {}) {
     setStatus('Reading files…');
 
     let imported = 0;
     let skipped = 0;
     let failed = 0;
+    let unsaved = 0;
 
     for (const file of files) {
         const name = file.name.toLowerCase();
@@ -644,6 +693,8 @@ async function importCharts(files) {
                     continue;
                 }
 
+                const added = [];
+
                 for (const entry of osuEntries) {
                     const map = parseChart(await zip.readText(entry), entry.split('/').pop());
 
@@ -652,9 +703,13 @@ async function importCharts(files) {
                         continue;
                     }
 
-                    addBeatmap(map, zip, file.name);
+                    const record = addBeatmap(map, zip, file.name, { blob: file, beatmapsetId });
+                    if (record) added.push(record);
                     imported++;
                 }
+
+                if (persist && added.length && !(await persistBeatmapset(added[0], file, 'osz')))
+                    unsaved += added.length;
             } else if (name.endsWith('.osu')) {
                 const map = parseChart(await file.text(), file.name);
 
@@ -663,8 +718,11 @@ async function importCharts(files) {
                     continue;
                 }
 
-                addBeatmap(map, null, file.name);
+                const record = addBeatmap(map, null, file.name, { blob: file, beatmapsetId });
                 imported++;
+
+                if (persist && record && !(await persistBeatmapset(record, file, 'osu')))
+                    unsaved++;
             } else {
                 skipped++;
             }
@@ -679,11 +737,12 @@ async function importCharts(files) {
     if (imported) parts.push(`Imported ${imported} chart${imported === 1 ? '' : 's'}`);
     if (skipped) parts.push(`${skipped} skipped (non-mania or unsupported)`);
     if (failed) parts.push(`${failed} unreadable`);
+    if (unsaved) parts.push(`${unsaved} kept for this session only (browser storage is unavailable or full)`);
 
     setStatus(parts.join(' · ') || 'Nothing to import.');
     renderLibrary();
 
-    return { imported, skipped, failed };
+    return { imported, skipped, failed, unsaved };
 }
 
 // ---------------------------------------------------------------- featured
@@ -718,8 +777,24 @@ async function featuredBlob(id) {
     return response.blob();
 }
 
+function markSeeded() {
+    try {
+        localStorage.setItem(SEEDED_KEY, '1');
+    } catch {
+        // Storage can be unavailable; seeding then just repeats on reload.
+    }
+}
+
+function wasSeeded() {
+    try {
+        return localStorage.getItem(SEEDED_KEY) === '1';
+    } catch {
+        return false;
+    }
+}
+
 async function seedFeatured() {
-    if (featuredStarted || state.beatmaps.length) return;
+    if (featuredStarted || state.beatmaps.length || wasSeeded()) return;
 
     featuredStarted = true;
     let imported = 0;
@@ -732,7 +807,7 @@ async function seedFeatured() {
             if (blob.size < 1024) throw new Error('the download was empty');
 
             const file = new File([blob], `${featured.title}.osz`, { type: 'application/zip' });
-            const result = await importCharts([file]);
+            const result = await importCharts([file], { beatmapsetId: featured.id });
             imported += result.imported;
         } catch (error) {
             failures++;
@@ -765,19 +840,59 @@ function admit(map) {
     return map.isMania && map.keyCount <= 10;
 }
 
-function addBeatmap(map, zip, source) {
+// One mapset (artist + title + creator) is the unit that is saved, previewed
+// and deleted, matching the rows in the library.
+function setKeyFor(map) {
+    return `${map.artist}|${map.title}|${map.creator}`.toLowerCase();
+}
+
+function addBeatmap(map, zip, source, { blob = null, beatmapsetId = null } = {}) {
     const key = `${map.artist}|${map.title}|${map.version}|${map.mode === 0 ? 'std' : map.keyCount}`;
 
     if (state.beatmaps.some(entry => entry.key === key))
-        return;
+        return null;
 
-    state.beatmaps.push({
+    const entry = {
         id: uid(),
         key,
+        setKey: setKeyFor(map),
         map,
         zip,
         source,
-    });
+        blob,
+        beatmapsetId,
+        stored: false,
+    };
+
+    state.beatmaps.push(entry);
+    return entry;
+}
+
+async function persistBeatmapset(entry, blob, kind) {
+    if (!blob) return false;
+
+    const map = entry.map;
+
+    try {
+        await saveBeatmapset({
+            id: entry.setKey,
+            name: blob.name || `${map.artist} - ${map.title}.${kind}`,
+            kind,
+            blob,
+            savedAt: Date.now(),
+            title: map.title,
+            artist: map.artist,
+            creator: map.creator,
+            beatmapsetId: entry.beatmapsetId ?? null,
+        });
+
+        markSeeded();
+        entry.stored = true;
+        return true;
+    } catch (error) {
+        console.warn('Beatmapset could not be saved to the browser', error);
+        return false;
+    }
 }
 
 // ---------------------------------------------------------------- library
@@ -890,6 +1005,79 @@ function renderLibrary() {
             item.append(info, tags);
         }
 
+        const currentEntry = () => sorted.find(entry => entry.id === (select ? select.value : first.id)) ?? first;
+
+        const actions = document.createElement('div');
+        actions.className = 'beatmap-actions';
+
+        const previewButton = document.createElement('button');
+        previewButton.type = 'button';
+        previewButton.className = 'icon-btn preview-btn';
+        previewButton.dataset.setKey = first.setKey;
+        previewButton.textContent = '♪';
+        previewButton.title = 'Play this song';
+        previewButton.setAttribute('aria-label', `Play the song of ${map.title}`);
+        previewButton.classList.toggle('playing', sorted.some(entry => entry.id === preview.entryId) && preview.playing);
+        previewButton.addEventListener('click', event => {
+            event.stopPropagation();
+            state.selectedId = currentEntry().id;
+            selectRow(item);
+            previewEntry(state.selectedId);
+        });
+
+        const downloadButton = document.createElement('button');
+        downloadButton.type = 'button';
+        downloadButton.className = 'icon-btn';
+        downloadButton.textContent = '↓';
+        downloadButton.title = 'Download this .osz to import into osu!';
+        downloadButton.setAttribute('aria-label', `Download ${map.title} for osu!`);
+        downloadButton.disabled = !currentEntry().blob;
+        downloadButton.addEventListener('click', event => {
+            event.stopPropagation();
+            downloadBeatmapset(currentEntry());
+        });
+
+        const deleteButton = document.createElement('button');
+        deleteButton.type = 'button';
+        deleteButton.className = 'icon-btn delete-btn';
+        deleteButton.textContent = '✕';
+        deleteButton.title = 'Delete this mapset from your library';
+        deleteButton.setAttribute('aria-label', `Delete ${map.title} from your library`);
+        deleteButton.addEventListener('click', async event => {
+            event.stopPropagation();
+
+            // First click arms the button, a second click within four seconds deletes.
+            if (!deleteButton.classList.contains('danger-confirm')) {
+                deleteButton.classList.add('danger-confirm');
+                deleteButton.textContent = 'Delete?';
+                deleteButton.resetTimer = setTimeout(() => {
+                    deleteButton.classList.remove('danger-confirm');
+                    deleteButton.textContent = '✕';
+                }, 4000);
+                return;
+            }
+
+            clearTimeout(deleteButton.resetTimer);
+            await deleteSet(first.setKey);
+        });
+
+        actions.append(previewButton);
+
+        if (first.beatmapsetId) {
+            const osuLink = document.createElement('a');
+            osuLink.className = 'icon-btn';
+            osuLink.href = `https://osu.ppy.sh/beatmapsets/${first.beatmapsetId}`;
+            osuLink.target = '_blank';
+            osuLink.rel = 'noreferrer';
+            osuLink.textContent = 'osu!';
+            osuLink.title = 'Open this mapset on osu.ppy.sh';
+            osuLink.setAttribute('aria-label', `Open ${map.title} on osu!`);
+            osuLink.addEventListener('click', event => event.stopPropagation());
+            actions.append(osuLink);
+        }
+
+        actions.append(downloadButton, deleteButton);
+
         const play = document.createElement('button');
         play.type = 'button';
         play.className = 'btn small primary';
@@ -899,11 +1087,13 @@ function renderLibrary() {
             playBeatmap(select ? select.value : first.id);
         });
 
-        item.append(play);
+        item.append(actions, play);
 
         item.addEventListener('click', () => {
             state.selectedId = select ? select.value : first.id;
             selectRow(item);
+            // Selecting a map is how you listen to it before playing.
+            previewEntry(state.selectedId);
         });
         item.addEventListener('dblclick', () => playBeatmap(select ? select.value : first.id));
 
@@ -930,6 +1120,7 @@ async function playBeatmap(id) {
 
     destroyGame();
     if (calibration.active) stopCalibration();
+    preview.stop();
 
     state.selectedId = id;
     state.currentId = id;
@@ -1118,6 +1309,9 @@ function showResults(summary) {
 
         $('#res-title').textContent = map.title || map.fileName;
         $('#res-diff').textContent = `${mode} · OD ${map.overallDifficulty}${star === null ? '' : ` · ★ ${star.toFixed(2)}`} · ${map.noteCount} notes`;
+
+        // Every finished attempt is a play in the local account.
+        rememberPlay(entry, summary);
     }
 
     const judgementSet = summary.mode === 'osu' ? STD_JUDGEMENTS : JUDGEMENTS;
@@ -1201,6 +1395,7 @@ function bindSettings() {
         dom.volumeValue.textContent = `${state.settings.volume}%`;
         saveSettings();
         audio.setVolume(state.settings.volume);
+        preview.setVolume(state.settings.volume);
     });
 
     dom.auto.addEventListener('change', () => {
@@ -1448,6 +1643,425 @@ async function downloadOnlineSet(set, button) {
     }
 }
 
+// ------------------------------------------------------------- song preview
+
+function previewEntry(id) {
+    const entry = state.beatmaps.find(candidate => candidate.id === id);
+    if (!entry) return;
+
+    // Selecting the map that is already previewing toggles it instead of restarting.
+    if (preview.entryId === id) {
+        preview.toggle();
+        return;
+    }
+
+    if (calibration.active) stopCalibration();
+
+    preview.play(entry, { volume: state.settings.volume }).then(result => {
+        if (!result.ok && result.reason) setStatus(result.reason);
+    });
+}
+
+function clock(seconds) {
+    const total = Math.max(0, Math.floor(seconds || 0));
+    return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function renderPreview(snapshot) {
+    const active = !!snapshot.entryId;
+    const entry = active
+        ? state.beatmaps.find(candidate => candidate.id === snapshot.entryId)
+        : null;
+
+    dom.previewBar.hidden = !active;
+    document.body.classList.toggle('previewing', active);
+
+    for (const button of dom.list.querySelectorAll('.preview-btn')) {
+        button.classList.toggle(
+            'playing',
+            !!entry && button.dataset.setKey === entry.setKey && snapshot.playing,
+        );
+    }
+
+    if (!active) return;
+
+    dom.previewTitle.textContent = entry ? entry.map.title : '—';
+    dom.previewSub.textContent = entry ? `${entry.map.artist} · ${entry.map.version}` : '';
+    dom.previewToggle.textContent = snapshot.playing ? '❚❚' : '▶';
+    dom.previewToggle.setAttribute('aria-label', snapshot.playing ? 'Pause preview' : 'Play preview');
+    dom.previewToggle.classList.toggle('loading', snapshot.loading);
+
+    const progress = snapshot.duration ? Math.min(1, snapshot.currentTime / snapshot.duration) : 0;
+    dom.previewFill.style.width = `${(progress * 100).toFixed(1)}%`;
+    dom.previewTime.textContent = `${clock(snapshot.currentTime)} / ${clock(snapshot.duration)}`;
+    dom.previewTrack.setAttribute('aria-valuenow', String(Math.round(progress * 100)));
+}
+
+function bindPreview() {
+    dom.previewToggle.addEventListener('click', () => preview.toggle());
+    dom.previewClose.addEventListener('click', () => preview.stop());
+
+    dom.previewTrack.addEventListener('click', event => {
+        const rect = dom.previewTrack.getBoundingClientRect();
+        if (rect.width) preview.seek((event.clientX - rect.left) / rect.width);
+    });
+}
+
+// ---------------------------------------------------------- library actions
+
+function entriesForSet(setKey) {
+    return state.beatmaps.filter(entry => entry.setKey === setKey);
+}
+
+// The stored file is the original .osz, so downloading it hands osu! an
+// importable mapset — the one real transfer this page can make to osu!.
+// Windows, Android and macOS all reject different characters in a filename, so
+// downloads get a name that is safe on every platform the page runs on.
+function safeFileName(name, fallback) {
+    const base = String(name || '')
+        .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 120);
+
+    return base && base !== '.' && base !== '..' ? base : fallback;
+}
+
+function downloadBeatmapset(entry) {
+    if (!entry?.blob) {
+        setStatus('This chart was loaded without its file, so there is nothing to download.');
+        return;
+    }
+
+    const fallback = safeFileName(`${entry.map.artist} - ${entry.map.title}.osz`, 'beatmap.osz');
+    const url = URL.createObjectURL(entry.blob);
+    const anchor = document.createElement('a');
+
+    anchor.href = url;
+    anchor.download = safeFileName(entry.blob.name, fallback);
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    setStatus(`Downloaded “${entry.map.title}” — drop the file into osu! to import it.`);
+}
+
+async function deleteSet(setKey) {
+    const removed = entriesForSet(setKey);
+    if (!removed.length) return;
+
+    if (removed.some(entry => entry.id === preview.entryId)) preview.stop();
+
+    state.beatmaps = state.beatmaps.filter(entry => entry.setKey !== setKey);
+
+    if (removed.some(entry => entry.id === state.selectedId)) state.selectedId = null;
+
+    try {
+        await deleteBeatmapset(setKey);
+    } catch (error) {
+        console.warn('Saved mapset could not be deleted', error);
+    }
+
+    setStatus(`Deleted “${removed[0].map.title}” from your library.`);
+    renderLibrary();
+}
+
+// --------------------------------------------------------------- account
+
+function initials(profile) {
+    const name = (profile?.username || profile?.osu?.username || '').trim();
+    const parts = name.split(/\s+/).filter(Boolean);
+
+    if (!parts.length) return '?';
+    if (parts.length > 1) return `${parts[0][0]}${parts[1][0]}`.toUpperCase();
+
+    return parts[0].slice(0, 2).toUpperCase();
+}
+
+function statTile(label, value) {
+    const tile = document.createElement('div');
+    tile.className = 'account-stat';
+
+    const caption = document.createElement('span');
+    caption.textContent = label;
+
+    const figure = document.createElement('b');
+    figure.textContent = value;
+
+    tile.append(caption, figure);
+    return tile;
+}
+
+function renderAccount() {
+    const profile = state.profile;
+    if (!profile) return;
+
+    const stats = profileStats(profile);
+
+    if (document.activeElement !== dom.accountName) dom.accountName.value = profile.username || '';
+    dom.accountBadge.textContent = profile.username ? 'local profile' : 'not signed in';
+
+    dom.accountAvatar.replaceChildren();
+    dom.accountAvatar.textContent = initials(profile);
+
+    if (profile.osu?.userId) {
+        const image = document.createElement('img');
+        image.alt = '';
+        image.src = `https://a.ppy.sh/${profile.osu.userId}`;
+        image.addEventListener('error', () => image.remove());
+        dom.accountAvatar.append(image);
+    }
+
+    dom.accountStats.replaceChildren(
+        statTile('plays', String(stats.plays)),
+        statTile('accuracy', `${stats.accuracy.toFixed(2)}%`),
+        statTile('best score', stats.bestScore ? stats.bestScore.toLocaleString() : '—'),
+        statTile('best grade', stats.bestGrade),
+        statTile('top combo', stats.maxCombo ? `${stats.maxCombo}x` : '—'),
+        statTile('time played', clock(stats.playTimeMs / 1000)),
+    );
+
+    const url = osuProfileUrl(profile.osu);
+
+    if (profile.osu && url) {
+        dom.osuProfile.hidden = true;
+        dom.osuLink.hidden = true;
+        dom.osuUnlink.hidden = false;
+
+        const link = document.createElement('a');
+        link.href = url;
+        link.target = '_blank';
+        link.rel = 'noreferrer';
+        link.textContent = profile.osu.username
+            ? `${profile.osu.username} on osu!`
+            : url.replace('https://', '');
+
+        dom.osuLinkStatus.replaceChildren(link);
+    } else {
+        dom.osuProfile.hidden = false;
+        if (document.activeElement !== dom.osuProfile) dom.osuProfile.value = '';
+        dom.osuLink.hidden = false;
+        dom.osuUnlink.hidden = true;
+        dom.osuLinkStatus.textContent = 'Link your osu! profile to show your avatar and open saved sets on osu.ppy.sh.';
+    }
+}
+
+function bindAccount() {
+    dom.accountSave.addEventListener('click', saveAccountName);
+
+    dom.accountName.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        saveAccountName();
+    });
+
+    dom.osuLink.addEventListener('click', linkOsuProfile);
+    dom.osuUnlink.addEventListener('click', unlinkOsuProfile);
+
+    dom.osuProfile.addEventListener('keydown', event => {
+        if (event.key !== 'Enter') return;
+        event.preventDefault();
+        linkOsuProfile();
+    });
+
+    dom.syncCopy.addEventListener('click', copySyncCode);
+    dom.syncApply.addEventListener('click', applySyncCode);
+}
+
+async function initProfile() {
+    let stored = null;
+
+    try {
+        stored = await loadProfile();
+    } catch (error) {
+        console.warn('Your saved account could not be read', error);
+    }
+
+    state.profile = sanitiseProfile(stored) ?? defaultProfile();
+    renderAccount();
+}
+
+async function persistProfile() {
+    if (!state.profile) return;
+
+    try {
+        await saveProfile(state.profile);
+    } catch (error) {
+        console.warn('Your account could not be saved', error);
+    }
+}
+
+async function saveAccountName() {
+    if (!state.profile) return;
+
+    const name = dom.accountName.value.trim().slice(0, 32);
+    state.profile = { ...state.profile, username: name, updatedAt: new Date().toISOString() };
+
+    await persistProfile();
+    renderAccount();
+    setStatus(name ? `Signed in as ${name}.` : 'Account name cleared.');
+}
+
+async function linkOsuProfile() {
+    const parsed = parseOsuProfile(dom.osuProfile.value);
+
+    if (!parsed) {
+        dom.osuLinkStatus.textContent = 'Use a link like osu.ppy.sh/users/7562902, or your numeric user ID.';
+        return;
+    }
+
+    state.profile = {
+        ...state.profile,
+        osu: { ...parsed, linkedAt: new Date().toISOString() },
+        updatedAt: new Date().toISOString(),
+    };
+
+    await persistProfile();
+    renderAccount();
+    setStatus('osu! profile linked.');
+}
+
+async function unlinkOsuProfile() {
+    state.profile = { ...state.profile, osu: null, updatedAt: new Date().toISOString() };
+
+    await persistProfile();
+    renderAccount();
+    setStatus('osu! profile unlinked.');
+}
+
+async function copySyncCode() {
+    if (!state.profile) return;
+
+    const code = encodeSyncCode(state.profile);
+
+    dom.syncCode.value = code;
+    dom.syncCode.focus();
+    dom.syncCode.select();
+
+    // The async clipboard only exists in secure contexts (HTTPS or localhost).
+    // Opening this from a phone via http://192.168.x.x has neither, on any OS,
+    // so fall back to the legacy copy command on the selected box.
+    let copied = false;
+
+    if (window.isSecureContext && navigator.clipboard?.writeText) {
+        try {
+            await navigator.clipboard.writeText(code);
+            copied = true;
+        } catch {
+            copied = false;
+        }
+    }
+
+    if (!copied) {
+        try {
+            copied = document.execCommand('copy');
+        } catch {
+            copied = false;
+        }
+    }
+
+    dom.syncStatus.textContent = copied
+        ? 'Sync code copied — paste it into webfield on another browser or device.'
+        : 'Sync code ready — it is selected, copy it with your usual shortcut.';
+}
+
+async function applySyncCode() {
+    const incoming = decodeSyncCode(dom.syncCode.value);
+
+    if (!incoming) {
+        dom.syncStatus.textContent = 'That sync code could not be read — paste the whole code and try again.';
+        return;
+    }
+
+    state.profile = mergeProfiles(state.profile, incoming);
+    await persistProfile();
+    renderAccount();
+
+    dom.syncCode.value = '';
+
+    const plays = state.profile.plays.length;
+    dom.syncStatus.textContent = `Account synced — ${plays} play${plays === 1 ? '' : 's'} in this profile.`;
+}
+
+function rememberPlay(entry, summary) {
+    if (!state.profile) return;
+
+    state.profile = recordPlay(state.profile, entry, summary);
+    renderAccount();
+    persistProfile();
+}
+
+// ---------------------------------------------------------------- startup
+
+// Rebuilds the in-memory charts from the .osz files saved in IndexedDB.
+async function restoreLibrary() {
+    let records = [];
+
+    try {
+        records = await listBeatmapsets();
+    } catch (error) {
+        console.warn('Saved library could not be read', error);
+        return 0;
+    }
+
+    if (!records.length) return 0;
+
+    let restored = 0;
+
+    for (const record of records) {
+        try {
+            if (record.kind === 'osu') {
+                const map = parseChart(await record.blob.text(), record.name);
+
+                if (admit(map) && addBeatmap(map, null, record.name, { blob: record.blob, beatmapsetId: record.beatmapsetId ?? null })) {
+                    restored++;
+                }
+
+                continue;
+            }
+
+            const zip = await readZip(record.blob);
+            const osuEntries = zip.names.filter(name => name.toLowerCase().endsWith('.osu'));
+
+            for (const osuName of osuEntries) {
+                const map = parseChart(await zip.readText(osuName), osuName.split('/').pop());
+
+                if (!admit(map)) continue;
+
+                const entry = addBeatmap(map, zip, record.name, {
+                    blob: record.blob,
+                    beatmapsetId: record.beatmapsetId ?? null,
+                });
+
+                if (entry) restored++;
+            }
+        } catch (error) {
+            console.warn(`Saved mapset ${record.name} could not be restored`, error);
+        }
+    }
+
+    for (const entry of state.beatmaps) entry.stored = true;
+
+    if (restored) markSeeded();
+
+    renderLibrary();
+    return restored;
+}
+
+async function init() {
+    await initProfile();
+
+    const restored = await restoreLibrary();
+
+    if (restored) {
+        setStatus(`Saved library ready — ${restored} chart${restored === 1 ? '' : 's'} loaded from this browser.`);
+        return;
+    }
+
+    await seedFeatured();
+}
+
 // -------------------------------------------------------------- event wiring
 
 function bindLibraryFilter() {
@@ -1542,8 +2156,10 @@ bindOnline();
 bindLibraryFilter();
 bindQuickActions();
 bindEvents();
+bindAccount();
+bindPreview();
 renderMods();
 renderKeyEditor();
 renderSkins();
 renderLibrary();
-seedFeatured();
+init();
